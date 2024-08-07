@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
 
+"""
+Update outdated ports in CRUX Linux.
+
+Usage:
+    update_ports.py [-n NUM_PORTS] [--skip-md5] [--skip PACKAGE [PACKAGE ...]] [--list PACKAGE [PACKAGE ...]]
+
+Options:
+    -n NUM_PORTS         Number of ports to update (default: update all).
+    --skip-md5           Skip MD5 check (default: generate new MD5 checksum).
+    --skip PACKAGE       List of packages to skip (default: empty).
+    --list PACKAGE       List of specific packages to update (default: update all outdated packages).
+"""
+
 import os
 import subprocess
 import argparse
@@ -34,7 +47,8 @@ def get_outdated_ports():
     return outdated_ports
 
 def find_port_directory(port_name):
-    possible_dirs = ['/usr/ports/core', '/usr/ports/opt', '/usr/ports/contrib', '/usr/ports/xfce', '/usr/ports/xorg']
+    possible_dirs = ['/usr/ports/core', '/usr/ports/opt', '/usr/ports/contrib', '/usr/ports/xfce', '/usr/ports/xorg', '/usr/ports/
+                     multilib', '/usr/ports/xfce4']
     for base_dir in possible_dirs:
         port_dir = os.path.join(base_dir, port_name)
         if os.path.isdir(port_dir):
@@ -54,13 +68,41 @@ def skip_md5_check(port_dir):
                     file.write(line)
         print(f"Skipped MD5 check in {pkgfile_path}")
 
-def update_port(port_name, installed_version, available_version):
+def update_pkgfile_with_new_md5(port_dir):
+    print(f"Updating Pkgfile with new MD5 checksum in {port_dir}...")
+    md5sum_result = subprocess.run(['pkgmk', '-um'], cwd=port_dir, capture_output=True, text=True)
+    new_md5sums = md5sum_result.stdout.strip().split('\n')
+    
+    pkgfile_path = os.path.join(port_dir, 'Pkgfile')
+    with open(pkgfile_path, 'r') as file:
+        lines = file.readlines()
+    
+    with open(pkgfile_path, 'w') as file:
+        md5sums_updated = False
+        for line in lines:
+            if line.strip().startswith('md5sums'):
+                if new_md5sums:
+                    file.write(f"md5sums=({new_md5sums[-1].split()[1]})\n")
+                    md5sums_updated = True
+            else:
+                file.write(line)
+        
+        if not md5sums_updated and new_md5sums:
+            file.write(f"md5sums=({new_md5sums[-1].split()[1]})\n")
+    
+    print(f"Updated MD5 checksum in {pkgfile_path}")
+
+def update_port(port_name, installed_version, available_version, skip_md5=False):
     port_dir = find_port_directory(port_name)
     if not port_dir:
         return False
 
     os.chdir(port_dir)
-    skip_md5_check(port_dir)
+    if skip_md5:
+        skip_md5_check(port_dir)
+    else:
+        update_pkgfile_with_new_md5(port_dir)
+    
     print(f"Building the package for {port_name} in {port_dir}...")
     result = subprocess.run(['sudo', 'pkgmk', '-if'], text=True)
     if result.returncode != 0:
@@ -97,6 +139,9 @@ def update_port(port_name, installed_version, available_version):
 def main():
     parser = argparse.ArgumentParser(description='Update outdated ports in CRUX Linux.')
     parser.add_argument('-n', type=int, help='number of ports to update (default: update all)')
+    parser.add_argument('--skip-md5', action='store_true', help='skip MD5 check (default: generate new MD5 checksum)')
+    parser.add_argument('--skip', nargs='+', help='list of packages to skip', default=[])
+    parser.add_argument('--list', nargs='+', help='list of specific packages to update', default=[])
     args = parser.parse_args()
 
     outdated_ports = get_outdated_ports()
@@ -110,9 +155,16 @@ def main():
         table.append([port_name, installed_version, available_version])
     print(tabulate(table, headers="firstrow"))
 
+    # Filter out ports to skip
+    ports_to_update = [port for port in outdated_ports if port[0] not in args.skip]
+
+    # Filter out ports not in the list if the list is specified
+    if args.list:
+        ports_to_update = [port for port in ports_to_update if port[0] in args.list]
+
     # Determine the number of ports to update
-    num_ports_to_update = args.n if args.n else len(outdated_ports)
-    ports_to_update = outdated_ports[:num_ports_to_update]
+    num_ports_to_update = args.n if args.n else len(ports_to_update)
+    ports_to_update = ports_to_update[:num_ports_to_update]
 
     updated_ports = []
 
@@ -120,13 +172,18 @@ def main():
         print("\n########################################")
         print(f"### Updating {port_name} from version {installed_version} to {available_version}...")
         print("########################################")
-        if update_port(port_name, installed_version, available_version):
+        if update_port(port_name, installed_version, available_version, args.skip_md5):
             updated_ports.append(port_name)
 
     print("\nSummary:")
     summary_table = [["Port Name", "Status"]]
-    for port_name, installed_version, available_version in ports_to_update:
-        status = "Updated" if port_name in updated_ports else "Failed"
+    for port_name, installed_version, available_version in outdated_ports:
+        if port_name in args.skip:
+            status = "Skipped"
+        elif args.list and port_name not in args.list:
+            status = "Not in list"
+        else:
+            status = "Updated" if port_name in updated_ports else "Failed"
         summary_table.append([port_name, status])
     
     print(tabulate(summary_table, headers="firstrow"))
