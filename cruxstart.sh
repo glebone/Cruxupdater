@@ -1,5 +1,13 @@
 #!/bin/bash
 
+
+# ^..^ CAT Soft - Crux Strat Script  
+# ------------------------------------------
+# 8 Aug 2024 ||  glebone@gmail.com  || Blahodatne on CruxPad
+# ------------------------------------------
+# Setup wireless, start wpa_supplicant, start dhcpcd, switch to user, start PulseAudio, start XFCE
+
+
 # Function to check the success of the last command
 check_success() {
     if [ $? -ne 0 ]; then

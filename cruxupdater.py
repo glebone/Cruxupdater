@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 
 """
+ ^..^ CAT Soft - Crux Updater Script 
+ ------------------------------------------
+ 8 Aug 2024 ||  glebone@gmail.com  || Blahodatne on CruxPad
+
 Update outdated ports in CRUX Linux.
 
 Usage:
@@ -47,8 +51,7 @@ def get_outdated_ports():
     return outdated_ports
 
 def find_port_directory(port_name):
-    possible_dirs = ['/usr/ports/core', '/usr/ports/opt', '/usr/ports/contrib', '/usr/ports/xfce', '/usr/ports/xorg', '/usr/ports/
-                     multilib', '/usr/ports/xfce4']
+    possible_dirs = ['/usr/ports/core', '/usr/ports/opt', '/usr/ports/contrib', '/usr/ports/xfce', '/usr/ports/xorg', '/usr/ports/xfce4']
     for base_dir in possible_dirs:
         port_dir = os.path.join(base_dir, port_name)
         if os.path.isdir(port_dir):
@@ -57,40 +60,28 @@ def find_port_directory(port_name):
     print(f"Directory for port {port_name} not found.")
     return None
 
-def skip_md5_check(port_dir):
-    pkgfile_path = os.path.join(port_dir, 'Pkgfile')
-    if os.path.exists(pkgfile_path):
-        with open(pkgfile_path, 'r') as file:
-            lines = file.readlines()
-        with open(pkgfile_path, 'w') as file:
-            for line in lines:
-                if not line.strip().startswith('md5sums'):
-                    file.write(line)
-        print(f"Skipped MD5 check in {pkgfile_path}")
-
 def update_pkgfile_with_new_md5(port_dir):
     print(f"Updating Pkgfile with new MD5 checksum in {port_dir}...")
     md5sum_result = subprocess.run(['pkgmk', '-um'], cwd=port_dir, capture_output=True, text=True)
-    new_md5sums = md5sum_result.stdout.strip().split('\n')
-    
-    pkgfile_path = os.path.join(port_dir, 'Pkgfile')
-    with open(pkgfile_path, 'r') as file:
-        lines = file.readlines()
-    
-    with open(pkgfile_path, 'w') as file:
-        md5sums_updated = False
-        for line in lines:
-            if line.strip().startswith('md5sums'):
-                if new_md5sums:
-                    file.write(f"md5sums=({new_md5sums[-1].split()[1]})\n")
-                    md5sums_updated = True
-            else:
-                file.write(line)
-        
-        if not md5sums_updated and new_md5sums:
-            file.write(f"md5sums=({new_md5sums[-1].split()[1]})\n")
-    
-    print(f"Updated MD5 checksum in {pkgfile_path}")
+    if md5sum_result.returncode != 0:
+        print(f"Failed to update MD5 checksum in {port_dir}.")
+        return False
+    print(f"Updated MD5 checksum in {port_dir}/Pkgfile")
+    return True
+
+def check_and_download_source(port_dir):
+    print(f"Checking and downloading source files in {port_dir}...")
+    result = subprocess.run(['pkgmk', '-d'], cwd=port_dir, text=True)
+    if result.returncode != 0:
+        print(f"Failed to download source files in {port_dir}. Attempting to regenerate MD5 checksums...")
+        if not update_pkgfile_with_new_md5(port_dir):
+            return False
+        result = subprocess.run(['pkgmk', '-d'], cwd=port_dir, text=True)
+        if result.returncode != 0:
+            print(f"Failed to download source files in {port_dir} after regenerating MD5 checksums.")
+            return False
+    print(f"Successfully downloaded source files in {port_dir}.")
+    return True
 
 def update_port(port_name, installed_version, available_version, skip_md5=False):
     port_dir = find_port_directory(port_name)
@@ -101,7 +92,12 @@ def update_port(port_name, installed_version, available_version, skip_md5=False)
     if skip_md5:
         skip_md5_check(port_dir)
     else:
-        update_pkgfile_with_new_md5(port_dir)
+        if not update_pkgfile_with_new_md5(port_dir):
+            return False
+    
+    # Check if the source file exists, if not download it
+    if not check_and_download_source(port_dir):
+        return False
     
     print(f"Building the package for {port_name} in {port_dir}...")
     result = subprocess.run(['sudo', 'pkgmk', '-if'], text=True)
@@ -113,14 +109,16 @@ def update_port(port_name, installed_version, available_version, skip_md5=False)
     pkg_files = []
     pkg_dir = os.path.join(port_dir, 'pkg')
     if os.path.exists(pkg_dir):
-        pkg_files = [f for f in os.listdir(pkg_dir) if f.startswith(f'{port_name}#')]
+        pkg_files = [f for f in os.listdir(pkg_dir) if f.startswith(f'{port_name}#') and f.endswith('.pkg.tar.gz')]
     if not pkg_files:
-        pkg_files = [f for f in os.listdir(port_dir) if f.startswith(f'{port_name}#')]
+        pkg_files = [f for f in os.listdir(port_dir) if f.startswith(f'{port_name}#') and f.endswith('.pkg.tar.gz')]
 
     if not pkg_files:
         print(f"No package file found for {port_name}.")
         return False
     
+    # Find the latest package file
+    pkg_files.sort(reverse=True)
     pkg_file = os.path.join(port_dir, pkg_files[0])
     print(f"Would install {pkg_file}")
     print(f"Updating {port_name} from version {installed_version} to {available_version}")
@@ -141,7 +139,7 @@ def main():
     parser.add_argument('-n', type=int, help='number of ports to update (default: update all)')
     parser.add_argument('--skip-md5', action='store_true', help='skip MD5 check (default: generate new MD5 checksum)')
     parser.add_argument('--skip', nargs='+', help='list of packages to skip', default=[])
-    parser.add_argument('--list', nargs='+', help='list of specific packages to update', default=[])
+    parser.add_argument('--list', nargs='+', help='list of specific packages to update', default=None)
     args = parser.parse_args()
 
     outdated_ports = get_outdated_ports()
@@ -159,7 +157,7 @@ def main():
     ports_to_update = [port for port in outdated_ports if port[0] not in args.skip]
 
     # Filter out ports not in the list if the list is specified
-    if args.list:
+    if args.list is not None:
         ports_to_update = [port for port in ports_to_update if port[0] in args.list]
 
     # Determine the number of ports to update
@@ -180,7 +178,7 @@ def main():
     for port_name, installed_version, available_version in outdated_ports:
         if port_name in args.skip:
             status = "Skipped"
-        elif args.list and port_name not in args.list:
+        elif args.list is not None and port_name not in args.list:
             status = "Not in list"
         else:
             status = "Updated" if port_name in updated_ports else "Failed"
