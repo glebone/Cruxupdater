@@ -20,13 +20,6 @@ Options:
 
 import os
 import sys
-import subprocess
-
-def check_success(command):
-    """Check if the last command succeeded."""
-    if command.returncode != 0:
-        print(f"Error: {command.args} failed.")
-        sys.exit(1)
 
 def update_wpa_supplicant(place):
     """Update the wpa_supplicant.conf based on the place parameter."""
@@ -67,27 +60,6 @@ def main():
 
     if place:
         update_wpa_supplicant(place)
-
-    # Bring up the wireless interface
-    command = subprocess.run(["ip", "link", "set", "wlp59s0", "up"])
-    check_success(command)
-
-    # Start wpa_supplicant
-    command = subprocess.run(["wpa_supplicant", "-B", "-i", "wlp59s0", "-c", "/etc/wpa_supplicant/wpa_supplicant.conf"])
-    check_success(command)
-
-    # Start dhcpcd to obtain an IP address
-    command = subprocess.run(["dhcpcd", "wlp59s0"])
-    check_success(command)
-
-    # Switch to user and start PulseAudio and XFCE
-    command = subprocess.run(['su', 'user', '-c', 'pulseaudio --start'])
-    check_success(command)
-
-    command = subprocess.run(['su', 'user', '-c', 'exec startxfce4'])
-    check_success(command)
-
-    print("All commands completed successfully.")
 
 if __name__ == "__main__":
     main()

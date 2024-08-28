@@ -63,9 +63,30 @@ def find_port_directory(port_name):
 def update_pkgfile_with_new_md5(port_dir):
     print(f"Updating Pkgfile with new MD5 checksum in {port_dir}...")
     md5sum_result = subprocess.run(['pkgmk', '-um'], cwd=port_dir, capture_output=True, text=True)
-    if md5sum_result.returncode != 0:
-        print(f"Failed to update MD5 checksum in {port_dir}.")
-        return False
+    
+    print(f"Command executed: pkgmk -um in {port_dir}")
+    print(f"STDOUT: {md5sum_result.stdout}")
+    print(f"STDERR: {md5sum_result.stderr}")
+    
+    if "Source file" in md5sum_result.stderr and "not found" in md5sum_result.stderr:
+        print("Source file not found. Attempting to download the source with pkgmk -d...")
+        
+        # Run pkgmk -d without capturing output, so progress is shown
+        download_result = subprocess.run(['pkgmk', '-d'], cwd=port_dir)
+        
+        if download_result.returncode == 0:
+            print("Source file downloaded successfully. Updating MD5 checksum...")
+            # After downloading, update the MD5 checksum
+            md5sum_result = subprocess.run(['pkgmk', '-um'], cwd=port_dir, capture_output=True, text=True)
+            print(f"Retry STDOUT: {md5sum_result.stdout}")
+            print(f"Retry STDERR: {md5sum_result.stderr}")
+            if md5sum_result.returncode != 0:
+                print(f"Failed to update MD5 checksum in {port_dir} after downloading the source.")
+                return False
+        else:
+            print(f"Failed to download source files in {port_dir}.")
+            return False
+    
     print(f"Updated MD5 checksum in {port_dir}/Pkgfile")
     return True
 
